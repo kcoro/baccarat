@@ -1,0 +1,57 @@
+<pre><u style="text-decoration-style:solid"><i><b>Baccarat Punto Banco Web Application</b></i></u>
+
+  <b>Overview</b>
+
+  A complete web-based implementation of Baccarat (Punto Banco variant) built with modern web technologies for a seamless casino gaming experience.
+
+  <b>Technical Stack</b>
+
+  - <b>Backend</b>: PHP 8 (no frameworks)
+  - <b>Frontend</b>: HTML with Tailwind CSS for styling
+  - <b>Interactivity</b>: HTMX for reactive behavior without page reloads
+  - <b>Session Management</b>: PHP sessions for game state persistence
+
+  <b>Key Features</b>
+
+  Game Mechanics
+
+  - <b>Authentic Punto Banco Rules</b>: Complete implementation of official Baccarat drawing rules
+  - <b>Card System</b>: Full 52-card deck with proper shuffling and dealing
+  - <b>Scoring Logic</b>: Correct modulo-10 scoring (Aces=1, Face cards=0, 2-9=face value)
+  - <b>Drawing Rules</b>: Automated Player and Banker drawing based on official casino rules
+
+  Betting System
+
+  - <b>Multiple Simultaneous Bets</b>: Players can bet on Player, Banker, and Tie simultaneously
+  - <b>Proper Payouts</b>:
+    - Player: 1:1 (even money)
+    - Banker: 19:20 (5% commission)
+    - Tie: 8:1
+  - <b>Real-time Balance Tracking</b>: Starting balance of $1,000 with accurate win/loss calculations
+
+  User Experience
+
+  - <b>Automatic Round Progression</b>: 3-second countdown with visual progress bar
+  - <b>No Page Reloads</b>: HTMX provides seamless gameplay
+  - <b>Clean Modern UI</b>: Green felt casino table design with card animations
+  - <b>Responsive Design</b>: Works on desktop and mobile devices
+  - <b>Visual Feedback</b>: Clear win/loss indicators and running bet totals
+
+  Technical Implementation
+
+  - <b>Session-based State</b>: Game state, balance, and bets persist across requests
+  - <b>HTMX Integration</b>: Reactive forms and automatic updates
+  - <b>Object-oriented Design</b>: Separate classes for Card, Deck, and BaccaratGame
+  - <b>Error Handling</b>: Proper validation and edge case management
+
+  <b>File Structure</b>
+
+  - <font color="#AFD7FF">index.php</font> - Main game interface and server logic
+  - <font color="#AFD7FF">BaccaratGame.php</font> - Core game engine with all business logic
+
+  <b>Game Flow</b>
+
+  1. <b>Betting Phase</b>: Players place bets on any combination of Player/Banker/Tie
+  2. <b>Deal Phase</b>: Cards are automatically dealt following Punto Banco rules
+  3. <b>Results Phase</b>: Winners determined, payouts calculated, balance updated
+  4. <b>Auto-progression</b>: 3-second countdown automatically starts new round</pre>
