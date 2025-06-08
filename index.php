@@ -207,15 +207,46 @@ $currentBets = $_SESSION['current_bets'] ?? [];
                     const totalAnimationTime = calculateTotalAnimationTime();
                     console.log(`Delaying countdown by ${totalAnimationTime}ms for card animations`);
                     
-                    // Wait for all cards to finish, then start countdown
+                    // Wait for all cards to finish, then show results and start countdown
                     setTimeout(() => {
+                        showGameResults();
                         startCountdown();
                     }, totalAnimationTime);
                 } else {
-                    // No card animations, start countdown immediately
+                    // No card animations, show results and start countdown immediately
+                    showGameResults();
                     startCountdown();
                 }
             }
+        }
+        
+        // Show the game results panel and scores
+        function showGameResults() {
+            const resultsPanel = document.getElementById('game-results');
+            const bankerScore = document.getElementById('banker-score');
+            const playerScore = document.getElementById('player-score');
+            const bankerCardCount = document.getElementById('banker-card-count');
+            const playerCardCount = document.getElementById('player-card-count');
+            
+            if (resultsPanel) {
+                resultsPanel.classList.remove('results-hidden');
+                resultsPanel.classList.add('results-visible');
+            }
+            
+            // Show actual scores and hide card counts
+            if (bankerScore && bankerCardCount) {
+                bankerScore.classList.remove('results-hidden');
+                bankerScore.classList.add('results-visible');
+                bankerCardCount.style.display = 'none';
+            }
+            
+            if (playerScore && playerCardCount) {
+                playerScore.classList.remove('results-hidden');
+                playerScore.classList.add('results-visible');
+                playerCardCount.style.display = 'none';
+            }
+            
+            console.log('Game results and scores now visible');
         }
         
         // Listen for HTMX events
@@ -368,10 +399,10 @@ $currentBets = $_SESSION['current_bets'] ?? [];
             background: linear-gradient(145deg, #1e40af, #3b82f6);
         }
         .betting-circle {
-            width: 150px;
-            height: 150px;
+            width: 200px;
+            height: 200px;
             border-radius: 50%;
-            border: 3px solid rgba(255,255,255,0.3);
+            border: 4px solid rgba(255,255,255,0.3);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -436,8 +467,8 @@ $currentBets = $_SESSION['current_bets'] ?? [];
         .history-banker { background: #ef4444; }
         .history-tie { background: #22c55e; }
         .card-large {
-            width: 80px;
-            height: 120px;
+            width: 100px;
+            height: 150px;
             opacity: 0;
             transform: translateY(-20px) scale(0.8);
             animation: cardDeal 0.6s ease-out forwards;
@@ -452,6 +483,17 @@ $currentBets = $_SESSION['current_bets'] ?? [];
                 opacity: 1;
                 transform: translateY(0) scale(1);
             }
+        }
+        
+        .results-hidden {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.5s ease-in-out;
+        }
+        
+        .results-visible {
+            opacity: 1;
+            pointer-events: auto;
         }
     </style>
 </head>
@@ -494,23 +536,50 @@ $currentBets = $_SESSION['current_bets'] ?? [];
         </div>
     </div>
     
-    <div class="container mx-auto px-4 py-8 mt-32">
+    <div class="flex min-h-screen mt-20">
+        <!-- Left Sidebar - Game Rules -->
+        <div class="w-80 bg-black bg-opacity-20 p-6 fixed left-0 top-20 bottom-0 overflow-y-auto">
+            <h3 class="text-xl font-bold text-white mb-4">Game Rules</h3>
+            <div class="text-white text-sm space-y-3">
+                <div>
+                    <h4 class="font-semibold text-yellow-400 mb-1">Card Values:</h4>
+                    <p>Cards 2-9 are worth face value, 10/J/Q/K are worth 0, Aces are worth 1</p>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-yellow-400 mb-1">Scoring:</h4>
+                    <p>Hand values are calculated modulo 10 (only units digit counts). Closest to 9 wins.</p>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-yellow-400 mb-1">Payouts:</h4>
+                    <ul class="list-disc list-inside space-y-1 ml-2">
+                        <li>Player bets pay 1:1</li>
+                        <li>Banker bets pay 19:20 (5% commission)</li>
+                        <li>Tie bets pay 8:1</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-yellow-400 mb-1">Third Card Rules:</h4>
+                    <p class="text-xs">Player draws on 0-5, stands on 6-7. Banker drawing depends on player's third card and banker's total.</p>
+                </div>
+            </div>
+        </div>
 
-        <!-- Game Table -->
-        <div class="game-table p-8 max-w-6xl mx-auto shadow-2xl relative" data-game-state="<?= $gameState['state'] ?>">
+        <!-- Main Game Area -->
+        <div class="flex-1 ml-80 px-8 py-8">
+            <!-- Game Table -->
+            <div class="game-table p-8 w-full max-w-none shadow-2xl relative" data-game-state="<?= $gameState['state'] ?>" style="min-height: 80vh;">
             
             <!-- Banker Section -->
             <div class="mb-8">
                 <div class="text-center mb-4">
                     <h2 class="text-2xl font-bold text-white mb-2">Banker</h2>
                     <div class="text-3xl font-bold text-yellow-400">
-                        <?php if ($gameState['state'] === 'finished' || $gameState['state'] === 'dealing' || ($gameState['state'] === 'dealing_progressive' && $gameState['dealStep'] >= 3)): ?>
+                        <span id="banker-score" class="results-hidden">
                             <?= $gameState['bankerScore'] ?>
-                        <?php else: ?>
-                            <span class="text-6xl font-bold text-black bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto">
-                                <?= count($gameState['bankerHand']) ?>
-                            </span>
-                        <?php endif; ?>
+                        </span>
+                        <span id="banker-card-count" class="text-6xl font-bold text-black bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto">
+                            <?= count($gameState['bankerHand']) ?>
+                        </span>
                     </div>
                 </div>
                 <div class="flex justify-center space-x-4" id="banker-cards">
@@ -535,7 +604,7 @@ $currentBets = $_SESSION['current_bets'] ?? [];
             </div>
 
             <!-- Betting Area -->
-            <div class="flex justify-center items-center space-x-12 mb-8">
+            <div class="flex justify-center items-center space-x-16 mb-12">
                 <!-- Player Betting Circle -->
                 <div class="betting-circle <?= isset($currentBets['player']) && $currentBets['player'] > 0 ? 'has-bet' : '' ?>" 
                      onclick="placeBet('player')" id="player-circle">
@@ -615,13 +684,12 @@ $currentBets = $_SESSION['current_bets'] ?? [];
                 <div class="text-center mb-4">
                     <h2 class="text-2xl font-bold text-white mb-2">Player</h2>
                     <div class="text-3xl font-bold text-yellow-400">
-                        <?php if ($gameState['state'] === 'finished' || $gameState['state'] === 'dealing' || ($gameState['state'] === 'dealing_progressive' && $gameState['dealStep'] >= 3)): ?>
+                        <span id="player-score" class="results-hidden">
                             <?= $gameState['playerScore'] ?>
-                        <?php else: ?>
-                            <span class="text-6xl font-bold text-black bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto">
-                                <?= count($gameState['playerHand']) ?>
-                            </span>
-                        <?php endif; ?>
+                        </span>
+                        <span id="player-card-count" class="text-6xl font-bold text-black bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto">
+                            <?= count($gameState['playerHand']) ?>
+                        </span>
                     </div>
                 </div>
                 <div class="flex justify-center space-x-4" id="player-cards">
@@ -647,7 +715,7 @@ $currentBets = $_SESSION['current_bets'] ?? [];
 
             <!-- Game Results -->
             <?php if ($gameState['state'] === 'finished'): ?>
-                <div class="text-center mb-6">
+                <div class="text-center mb-6 results-hidden" id="game-results">
                     <div class="text-3xl font-bold text-white mb-4">
                         <?php
                         switch ($gameState['result']) {
@@ -714,15 +782,6 @@ $currentBets = $_SESSION['current_bets'] ?? [];
                 </div>
             <?php endif; ?>
 
-            <!-- Game Rules -->
-            <div class="mt-8 bg-green-700 rounded-lg p-4 text-white text-sm">
-                <h3 class="font-bold mb-2">Game Rules:</h3>
-                <ul class="list-disc list-inside space-y-1">
-                    <li>Cards 2-9 are worth face value, 10/J/Q/K are worth 0, Aces are worth 1</li>
-                    <li>Hand values are calculated modulo 10 (only units digit counts)</li>
-                    <li>Closest to 9 wins</li>
-                    <li>Player bets pay 1:1, Banker bets pay 19:20 (5% commission), Tie bets pay 8:1</li>
-                </ul>
             </div>
         </div>
     </div>
