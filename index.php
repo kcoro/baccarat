@@ -14,6 +14,11 @@ if (!isset($_SESSION['current_bets'])) {
     $_SESSION['current_bets'] = [];
 }
 
+// Ensure game_history is always set
+if (!isset($_SESSION['game_history'])) {
+    $_SESSION['game_history'] = [];
+}
+
 $game = unserialize($_SESSION['game']);
 $balance = $_SESSION['balance'];
 $currentBets = $_SESSION['current_bets'] ?? [];
@@ -25,6 +30,14 @@ if (isset($_POST['action'])) {
             // Process any pending bets first
             $currentGameState = $game->getGameState();
             if (isset($_SESSION['current_bets']) && !empty($_SESSION['current_bets']) && $currentGameState['state'] === 'finished') {
+                // Add result to history
+                $_SESSION['game_history'][] = $currentGameState['result'];
+                
+                // Keep only last 100 games
+                if (count($_SESSION['game_history']) > 100) {
+                    $_SESSION['game_history'] = array_slice($_SESSION['game_history'], -100);
+                }
+                
                 $totalPayout = 0;
                 foreach ($_SESSION['current_bets'] as $betType => $betAmount) {
                     $payout = $game->calculatePayout($betType, $betAmount);
@@ -56,8 +69,43 @@ if (isset($_POST['action'])) {
             
         case 'deal':
             if (!empty($_SESSION['current_bets'])) {
-                $game->dealInitialCards();
+                // For now, let's use instant dealing but add progressive later
+                $game->dealAllCardsAtOnce();
                 $_SESSION['game'] = serialize($game);
+                
+                // Record the result in history
+                $currentGameState = $game->getGameState();
+                if ($currentGameState['state'] === 'finished') {
+                    $_SESSION['game_history'][] = $currentGameState['result'];
+                    
+                    // Keep only last 100 games
+                    if (count($_SESSION['game_history']) > 100) {
+                        $_SESSION['game_history'] = array_slice($_SESSION['game_history'], -100);
+                    }
+                }
+            }
+            break;
+            
+        case 'clear_bets':
+            $_SESSION['balance'] += array_sum($_SESSION['current_bets'] ?? []);
+            $_SESSION['current_bets'] = [];
+            break;
+            
+        case 'undo_bet':
+            if (!empty($_SESSION['current_bets'])) {
+                // Remove the last bet placed (simple undo - removes one chip value from the last bet type)
+                end($_SESSION['current_bets']);
+                $lastBetType = key($_SESSION['current_bets']);
+                if ($_SESSION['current_bets'][$lastBetType] > 0) {
+                    // Determine the chip value to remove (assume it was the selected chip value or smallest available)
+                    $undoAmount = min($_SESSION['current_bets'][$lastBetType], 1); // Minimum 1 for now
+                    $_SESSION['current_bets'][$lastBetType] -= $undoAmount;
+                    $_SESSION['balance'] += $undoAmount;
+                    
+                    if ($_SESSION['current_bets'][$lastBetType] <= 0) {
+                        unset($_SESSION['current_bets'][$lastBetType]);
+                    }
+                }
             }
             break;
             
@@ -66,6 +114,14 @@ if (isset($_POST['action'])) {
                 // Make sure we have the current game state
                 $currentGameState = $game->getGameState();
                 if ($currentGameState['state'] === 'finished') {
+                    // Add result to history
+                    $_SESSION['game_history'][] = $currentGameState['result'];
+                    
+                    // Keep only last 100 games
+                    if (count($_SESSION['game_history']) > 100) {
+                        $_SESSION['game_history'] = array_slice($_SESSION['game_history'], -100);
+                    }
+                    
                     $totalPayout = 0;
                     foreach ($_SESSION['current_bets'] as $betType => $betAmount) {
                         $payout = $game->calculatePayout($betType, $betAmount);
@@ -144,7 +200,21 @@ $currentBets = $_SESSION['current_bets'] ?? [];
         // Start countdown when auto-progress elements are detected
         function checkAndStartCountdown() {
             if (document.querySelector('#auto-progress-btn')) {
-                startCountdown();
+                // Check if there are cards animating
+                const animatingCards = document.querySelectorAll('.card-large');
+                if (animatingCards.length > 0) {
+                    // Calculate how long to wait for all cards to finish animating
+                    const totalAnimationTime = calculateTotalAnimationTime();
+                    console.log(`Delaying countdown by ${totalAnimationTime}ms for card animations`);
+                    
+                    // Wait for all cards to finish, then start countdown
+                    setTimeout(() => {
+                        startCountdown();
+                    }, totalAnimationTime);
+                } else {
+                    // No card animations, start countdown immediately
+                    startCountdown();
+                }
             }
         }
         
@@ -158,164 +228,419 @@ $currentBets = $_SESSION['current_bets'] ?? [];
             setTimeout(checkAndStartCountdown, 100);
         });
         
+        // Calculate total card animation time
+        function calculateTotalAnimationTime() {
+            const allCards = document.querySelectorAll('.card-large');
+            let maxDelay = 0;
+            
+            allCards.forEach(card => {
+                const animationDelay = parseFloat(getComputedStyle(card).animationDelay) || 0;
+                maxDelay = Math.max(maxDelay, animationDelay);
+            });
+            
+            // Convert to milliseconds and add animation duration (0.6s)
+            return (maxDelay + 0.6) * 1000;
+        }
+        
         // Cleanup
         window.addEventListener('beforeunload', function() {
             if (countdownTimer) clearInterval(countdownTimer);
         });
+        
+        // Chip and betting functionality
+        let selectedChipValue = 0;
+        
+        function selectChip(value) {
+            selectedChipValue = value;
+            
+            // Remove selected class from all chips
+            document.querySelectorAll('.chip').forEach(chip => {
+                chip.classList.remove('selected');
+            });
+            
+            // Add selected class to clicked chip
+            document.querySelector(`[data-value="${value}"]`).classList.add('selected');
+        }
+        
+        function placeBet(betType) {
+            if (selectedChipValue === 0) {
+                alert('Please select a chip first!');
+                return;
+            }
+            
+            // Create hidden form and submit bet
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.setAttribute('hx-post', 'index.php');
+            form.setAttribute('hx-target', 'body');
+            form.setAttribute('hx-swap', 'outerHTML');
+            
+            const actionInput = document.createElement('input');
+            actionInput.type = 'hidden';
+            actionInput.name = 'action';
+            actionInput.value = 'place_bet';
+            
+            const betTypeInput = document.createElement('input');
+            betTypeInput.type = 'hidden';
+            betTypeInput.name = 'bet_type';
+            betTypeInput.value = betType;
+            
+            const betAmountInput = document.createElement('input');
+            betAmountInput.type = 'hidden';
+            betAmountInput.name = 'bet_amount';
+            betAmountInput.value = selectedChipValue;
+            
+            form.appendChild(actionInput);
+            form.appendChild(betTypeInput);
+            form.appendChild(betAmountInput);
+            
+            document.body.appendChild(form);
+            htmx.process(form);
+            form.submit();
+        }
+        
+        function startDeal() {
+            // Deal all cards at once (server-side), then animate them progressively (client-side)
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.setAttribute('hx-post', 'index.php');
+            form.setAttribute('hx-target', 'body');
+            form.setAttribute('hx-swap', 'outerHTML');
+            
+            const actionInput = document.createElement('input');
+            actionInput.type = 'hidden';
+            actionInput.name = 'action';
+            actionInput.value = 'deal';
+            
+            form.appendChild(actionInput);
+            document.body.appendChild(form);
+            htmx.process(form);
+            form.submit();
+        }
+        
+        // No JavaScript needed - using pure CSS animations
+        
+        function clearAllBets() {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.setAttribute('hx-post', 'index.php');
+            form.setAttribute('hx-target', 'body');
+            form.setAttribute('hx-swap', 'outerHTML');
+            
+            const actionInput = document.createElement('input');
+            actionInput.type = 'hidden';
+            actionInput.name = 'action';
+            actionInput.value = 'clear_bets';
+            
+            form.appendChild(actionInput);
+            document.body.appendChild(form);
+            htmx.process(form);
+            form.submit();
+        }
+        
+        function undoBet() {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.setAttribute('hx-post', 'index.php');
+            form.setAttribute('hx-target', 'body');
+            form.setAttribute('hx-swap', 'outerHTML');
+            
+            const actionInput = document.createElement('input');
+            actionInput.type = 'hidden';
+            actionInput.name = 'action';
+            actionInput.value = 'undo_bet';
+            
+            form.appendChild(actionInput);
+            document.body.appendChild(form);
+            htmx.process(form);
+            form.submit();
+        }
     </script>
     <style>
         .card {
             aspect-ratio: 2.5/3.5;
             background: linear-gradient(145deg, #ffffff, #f0f0f0);
-            border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            border-radius: 12px;
+            box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+            border: 2px solid #e5e5e5;
         }
         .card-back {
-            background: linear-gradient(145deg, #1e3a8a, #3b82f6);
+            background: linear-gradient(145deg, #1e40af, #3b82f6);
         }
-        .betting-area {
-            background: linear-gradient(145deg, #065f46, #10b981);
+        .betting-circle {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            border: 3px solid rgba(255,255,255,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+        .betting-circle:hover {
+            border-color: rgba(255,255,255,0.6);
+            transform: scale(1.05);
+        }
+        .betting-circle.has-bet {
+            border-color: #fbbf24;
+            background: rgba(251,191,36,0.2);
+        }
+        .chip {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 3px solid rgba(255,255,255,0.3);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        .chip:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.4);
+        }
+        .chip.selected {
+            border-color: #fbbf24;
+            box-shadow: 0 0 20px rgba(251,191,36,0.5);
+        }
+        .chip-1 { background: linear-gradient(145deg, #f3f4f6, #d1d5db); color: #1f2937; }
+        .chip-5 { background: linear-gradient(145deg, #ef4444, #dc2626); }
+        .chip-25 { background: linear-gradient(145deg, #22c55e, #16a34a); }
+        .chip-100 { background: linear-gradient(145deg, #1f2937, #111827); }
+        .chip-500 { background: linear-gradient(145deg, #3b82f6, #2563eb); }
+        .game-table {
+            background: linear-gradient(135deg, #0d9488, #14b8a6);
+            border-radius: 20px;
+            position: relative;
+        }
+        .betting-history {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            gap: 4px;
+            margin: 20px 0;
+        }
+        .history-dot {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        .history-player { background: #3b82f6; }
+        .history-banker { background: #ef4444; }
+        .history-tie { background: #22c55e; }
+        .card-large {
+            width: 80px;
+            height: 120px;
+            opacity: 0;
+            transform: translateY(-20px) scale(0.8);
+            animation: cardDeal 0.6s ease-out forwards;
+        }
+        
+        @keyframes cardDeal {
+            from {
+                opacity: 0;
+                transform: translateY(-20px) scale(0.8);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
         }
     </style>
 </head>
-<body class="bg-green-900 min-h-screen">
-    <div class="container mx-auto px-4 py-8">
-        <!-- Header -->
-        <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-white mb-2">Baccarat</h1>
-            <p class="text-green-200">Punto Banco</p>
-            <div class="mt-4 text-white">
-                <span class="text-xl">Balance: $<?= number_format($balance) ?></span>
-                <?php if (!empty($currentBets)): ?>
-                    <br><span class="text-sm text-yellow-300">
-                        Active Bets: $<?= number_format(array_sum($currentBets)) ?>
-                    </span>
-                <?php endif; ?>
-                
-            </div>
+<body class="min-h-screen" style="background: linear-gradient(135deg, #0d9488, #14b8a6);">
+    <!-- Menu button -->
+    <div class="absolute top-4 left-4">
+        <div class="text-white text-2xl cursor-pointer">
+            <div class="w-6 h-0.5 bg-white mb-1"></div>
+            <div class="w-6 h-0.5 bg-white mb-1"></div>
+            <div class="w-6 h-0.5 bg-white"></div>
         </div>
+    </div>
+    
+    <!-- Header with balance -->
+    <div class="absolute top-4 left-20 bg-black bg-opacity-20 rounded-lg px-4 py-2">
+        <div class="text-white text-xl font-bold">$ <?= number_format($balance) ?></div>
+    </div>
+    
+    <!-- Betting history -->
+    <div class="absolute top-16 left-1/2 transform -translate-x-1/2">
+        <div class="betting-history">
+            <?php 
+            $gameHistory = $_SESSION['game_history'] ?? [];
+            // Fill empty slots up to 100
+            $totalSlots = 100;
+            $emptySlots = $totalSlots - count($gameHistory);
+            
+            // Show empty slots first
+            for($i = 0; $i < $emptySlots; $i++): ?>
+                <div class="history-dot"></div>
+            <?php endfor; ?>
+            
+            <?php 
+            // Show actual game results
+            foreach($gameHistory as $result): 
+                $cssClass = 'history-' . $result; // will be history-player, history-banker, or history-tie
+            ?>
+                <div class="history-dot <?= $cssClass ?>"></div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+    
+    <div class="container mx-auto px-4 py-8 mt-32">
 
         <!-- Game Table -->
-        <div class="bg-green-800 rounded-lg p-8 max-w-6xl mx-auto shadow-2xl">
+        <div class="game-table p-8 max-w-6xl mx-auto shadow-2xl relative" data-game-state="<?= $gameState['state'] ?>">
             
             <!-- Banker Section -->
             <div class="mb-8">
                 <div class="text-center mb-4">
                     <h2 class="text-2xl font-bold text-white mb-2">Banker</h2>
                     <div class="text-3xl font-bold text-yellow-400">
-                        Score: <?= $gameState['state'] === 'finished' ? $gameState['bankerScore'] : '?' ?>
+                        <?php if ($gameState['state'] === 'finished' || $gameState['state'] === 'dealing' || ($gameState['state'] === 'dealing_progressive' && $gameState['dealStep'] >= 3)): ?>
+                            <?= $gameState['bankerScore'] ?>
+                        <?php else: ?>
+                            <span class="text-6xl font-bold text-black bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto">
+                                <?= count($gameState['bankerHand']) ?>
+                            </span>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <div class="flex justify-center space-x-4" id="banker-cards">
-                    <?php if ($gameState['state'] === 'finished'): ?>
-                        <?php foreach ($gameState['bankerHand'] as $card): ?>
-                            <div class="card w-16 h-24 flex items-center justify-center text-lg font-bold <?= in_array($card->suit, ['♥', '♦']) ? 'text-red-600' : 'text-black' ?>">
+                    <?php 
+                    $showCards = $gameState['state'] === 'finished' || $gameState['state'] === 'dealing_progressive' || $gameState['state'] === 'dealing';
+                    $bankerCards = $gameState['bankerHand'];
+                    ?>
+                    
+                    <?php if ($showCards && count($bankerCards) > 0): ?>
+                        <?php foreach ($bankerCards as $index => $card): ?>
+                            <?php 
+                            // Baccarat dealing order: player-0=0s, banker-0=0.8s, player-1=1.6s, banker-1=2.4s, etc.
+                            $dealDelay = ($index == 0) ? '0.8s' : (($index == 1) ? '2.4s' : (($index == 2) ? '4.8s' : '0s'));
+                            ?>
+                            <div class="card card-large flex items-center justify-center text-2xl font-bold <?= in_array($card->suit, ['♥', '♦']) ? 'text-red-600' : 'text-black' ?>" 
+                                 style="animation-delay: <?= $dealDelay ?>;">
                                 <?= $card ?>
                             </div>
                         <?php endforeach; ?>
-                    <?php else: ?>
-                        <div class="card card-back w-16 h-24"></div>
-                        <div class="card card-back w-16 h-24"></div>
                     <?php endif; ?>
                 </div>
             </div>
 
             <!-- Betting Area -->
-            <div class="grid grid-cols-3 gap-4 mb-8">
-                <div class="betting-area rounded-lg p-6 text-center text-white">
-                    <h3 class="text-xl font-bold mb-2">BANKER</h3>
-                    <p class="text-sm mb-4">Pays 19:20</p>
-                    <?php if ($gameState['state'] === 'betting'): ?>
-                        <form hx-post="index.php" hx-target="body" hx-swap="outerHTML">
-                            <input type="hidden" name="action" value="place_bet">
-                            <input type="hidden" name="bet_type" value="banker">
-                            <input type="number" name="bet_amount" min="1" max="<?= $balance ?>" 
-                                   class="w-full mb-2 px-3 py-2 text-black rounded" placeholder="Bet Amount">
-                            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-                                Add Bet
-                            </button>
-                        </form>
-                    <?php endif; ?>
-                    <?php if (isset($currentBets['banker']) && $currentBets['banker'] > 0): ?>
-                        <div class="bg-yellow-500 text-black p-2 rounded font-bold mt-2">
-                            Total Bet: $<?= number_format($currentBets['banker']) ?>
-                        </div>
-                    <?php endif; ?>
-                </div>
-
-                <div class="betting-area rounded-lg p-6 text-center text-white">
-                    <h3 class="text-xl font-bold mb-2">TIE</h3>
-                    <p class="text-sm mb-4">Pays 8:1</p>
-                    <?php if ($gameState['state'] === 'betting'): ?>
-                        <form hx-post="index.php" hx-target="body" hx-swap="outerHTML">
-                            <input type="hidden" name="action" value="place_bet">
-                            <input type="hidden" name="bet_type" value="tie">
-                            <input type="number" name="bet_amount" min="1" max="<?= $balance ?>" 
-                                   class="w-full mb-2 px-3 py-2 text-black rounded" placeholder="Bet Amount">
-                            <button type="submit" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded">
-                                Add Bet
-                            </button>
-                        </form>
-                    <?php endif; ?>
-                    <?php if (isset($currentBets['tie']) && $currentBets['tie'] > 0): ?>
-                        <div class="bg-yellow-500 text-black p-2 rounded font-bold mt-2">
-                            Total Bet: $<?= number_format($currentBets['tie']) ?>
-                        </div>
-                    <?php endif; ?>
-                </div>
-
-                <div class="betting-area rounded-lg p-6 text-center text-white">
-                    <h3 class="text-xl font-bold mb-2">PLAYER</h3>
-                    <p class="text-sm mb-4">Pays 1:1</p>
-                    <?php if ($gameState['state'] === 'betting'): ?>
-                        <form hx-post="index.php" hx-target="body" hx-swap="outerHTML">
-                            <input type="hidden" name="action" value="place_bet">
-                            <input type="hidden" name="bet_type" value="player">
-                            <input type="number" name="bet_amount" min="1" max="<?= $balance ?>" 
-                                   class="w-full mb-2 px-3 py-2 text-black rounded" placeholder="Bet Amount">
-                            <button type="submit" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
-                                Add Bet
-                            </button>
-                        </form>
-                    <?php endif; ?>
+            <div class="flex justify-center items-center space-x-12 mb-8">
+                <!-- Player Betting Circle -->
+                <div class="betting-circle <?= isset($currentBets['player']) && $currentBets['player'] > 0 ? 'has-bet' : '' ?>" 
+                     onclick="placeBet('player')" id="player-circle">
+                    <div class="text-white font-bold text-lg">PLAYER</div>
                     <?php if (isset($currentBets['player']) && $currentBets['player'] > 0): ?>
-                        <div class="bg-yellow-500 text-black p-2 rounded font-bold mt-2">
-                            Total Bet: $<?= number_format($currentBets['player']) ?>
+                        <div class="absolute -bottom-2 bg-yellow-500 text-black px-2 py-1 rounded text-sm font-bold">
+                            $<?= $currentBets['player'] ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                
+                <!-- Tie Betting Circle -->
+                <div class="betting-circle <?= isset($currentBets['tie']) && $currentBets['tie'] > 0 ? 'has-bet' : '' ?>" 
+                     onclick="placeBet('tie')" id="tie-circle">
+                    <div class="text-white font-bold text-lg">TIE</div>
+                    <div class="text-white text-sm">PAYS 9:1</div>
+                    <div class="text-white text-xs">$1 Min | $500 Max</div>
+                    <?php if (isset($currentBets['tie']) && $currentBets['tie'] > 0): ?>
+                        <div class="absolute -bottom-2 bg-yellow-500 text-black px-2 py-1 rounded text-sm font-bold">
+                            $<?= $currentBets['tie'] ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                
+                <!-- Banker Betting Circle -->
+                <div class="betting-circle <?= isset($currentBets['banker']) && $currentBets['banker'] > 0 ? 'has-bet' : '' ?>" 
+                     onclick="placeBet('banker')" id="banker-circle">
+                    <div class="text-white font-bold text-lg">BANKER</div>
+                    <?php if (isset($currentBets['banker']) && $currentBets['banker'] > 0): ?>
+                        <div class="absolute -bottom-2 bg-yellow-500 text-black px-2 py-1 rounded text-sm font-bold">
+                            $<?= $currentBets['banker'] ?>
                         </div>
                     <?php endif; ?>
                 </div>
             </div>
             
-            <!-- Deal Button -->
-            <?php if ($gameState['state'] === 'betting' && !empty($currentBets)): ?>
-                <div class="text-center mb-6">
-                    <form hx-post="index.php" hx-target="body" hx-swap="outerHTML">
-                        <input type="hidden" name="action" value="deal">
-                        <button type="submit" class="bg-green-600 hover:bg-green-700 text-white font-bold py-4 px-8 rounded-lg text-xl">
-                            DEAL CARDS
-                        </button>
-                    </form>
+            <!-- Chip Selection -->
+            <div class="flex justify-center space-x-4 mb-8" id="chip-selector">
+                <div class="chip chip-1" onclick="selectChip(1)" data-value="1">1</div>
+                <div class="chip chip-5" onclick="selectChip(5)" data-value="5">5</div>
+                <div class="chip chip-25" onclick="selectChip(25)" data-value="25">25</div>
+                <div class="chip chip-100" onclick="selectChip(100)" data-value="100">100</div>
+                <div class="chip chip-500" onclick="selectChip(500)" data-value="500">500</div>
+            </div>
+            
+            <!-- Control Buttons on Right -->
+            <div class="absolute right-4 top-1/2 transform -translate-y-1/2 flex flex-col space-y-4">
+                <!-- Clear All Button -->
+                <div class="bg-white bg-opacity-20 rounded-full p-4 cursor-pointer hover:bg-opacity-30 transition-all" onclick="clearAllBets()">
+                    <div class="text-white text-center">
+                        <div class="text-2xl mb-1">✕</div>
+                        <div class="text-sm font-bold">Clear All</div>
+                    </div>
                 </div>
-            <?php endif; ?>
+                
+                <!-- Deal Button -->
+                <?php if ($gameState['state'] === 'betting' && !empty($currentBets)): ?>
+                    <button onclick="startDeal()" class="bg-white bg-opacity-20 rounded-full p-4 cursor-pointer hover:bg-opacity-30 transition-all">
+                        <div class="text-white text-center">
+                            <div class="text-2xl mb-1">🂠</div>
+                            <div class="text-sm font-bold">Deal</div>
+                        </div>
+                    </button>
+                <?php endif; ?>
+                
+                <!-- Undo Button -->
+                <div class="bg-white bg-opacity-20 rounded-full p-4 cursor-pointer hover:bg-opacity-30 transition-all" onclick="undoBet()">
+                    <div class="text-white text-center">
+                        <div class="text-2xl mb-1">↶</div>
+                        <div class="text-sm font-bold">Undo</div>
+                    </div>
+                </div>
+            </div>
 
             <!-- Player Section -->
             <div class="mb-8">
                 <div class="text-center mb-4">
                     <h2 class="text-2xl font-bold text-white mb-2">Player</h2>
                     <div class="text-3xl font-bold text-yellow-400">
-                        Score: <?= $gameState['state'] === 'finished' ? $gameState['playerScore'] : '?' ?>
+                        <?php if ($gameState['state'] === 'finished' || $gameState['state'] === 'dealing' || ($gameState['state'] === 'dealing_progressive' && $gameState['dealStep'] >= 3)): ?>
+                            <?= $gameState['playerScore'] ?>
+                        <?php else: ?>
+                            <span class="text-6xl font-bold text-black bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto">
+                                <?= count($gameState['playerHand']) ?>
+                            </span>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <div class="flex justify-center space-x-4" id="player-cards">
-                    <?php if ($gameState['state'] === 'finished'): ?>
-                        <?php foreach ($gameState['playerHand'] as $card): ?>
-                            <div class="card w-16 h-24 flex items-center justify-center text-lg font-bold <?= in_array($card->suit, ['♥', '♦']) ? 'text-red-600' : 'text-black' ?>">
+                    <?php 
+                    $showCards = $gameState['state'] === 'finished' || $gameState['state'] === 'dealing_progressive' || $gameState['state'] === 'dealing';
+                    $playerCards = $gameState['playerHand'];
+                    ?>
+                    
+                    <?php if ($showCards && count($playerCards) > 0): ?>
+                        <?php foreach ($playerCards as $index => $card): ?>
+                            <?php 
+                            // Baccarat dealing order: player-0=0s, banker-0=0.8s, player-1=1.6s, banker-1=2.4s, etc.
+                            $dealDelay = ($index == 0) ? '0s' : (($index == 1) ? '1.6s' : (($index == 2) ? '4.0s' : '0s'));
+                            ?>
+                            <div class="card card-large flex items-center justify-center text-2xl font-bold <?= in_array($card->suit, ['♥', '♦']) ? 'text-red-600' : 'text-black' ?>" 
+                                 style="animation-delay: <?= $dealDelay ?>;">
                                 <?= $card ?>
                             </div>
                         <?php endforeach; ?>
-                    <?php else: ?>
-                        <div class="card card-back w-16 h-24"></div>
-                        <div class="card card-back w-16 h-24"></div>
                     <?php endif; ?>
                 </div>
             </div>

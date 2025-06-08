@@ -53,10 +53,11 @@ class BaccaratGame {
     private $deck;
     private $playerHand = [];
     private $bankerHand = [];
-    private $gameState = 'betting'; // betting, dealing, finished
+    private $gameState = 'betting'; // betting, dealing, dealing_progressive, finished
     private $result = null;
     private $playerScore = 0;
     private $bankerScore = 0;
+    private $dealStep = 0; // For progressive dealing: 0=start, 1=player1, 2=banker1, 3=player2, 4=banker2, etc.
     
     public function __construct() {
         $this->deck = new Deck();
@@ -70,9 +71,28 @@ class BaccaratGame {
         $this->result = null;
         $this->playerScore = 0;
         $this->bankerScore = 0;
+        $this->dealStep = 0;
+    }
+    
+    public function startProgressiveDeal() {
+        if ($this->gameState !== 'betting') return false;
+        
+        $this->gameState = 'dealing_progressive';
+        $this->dealStep = 0;
+        
+        return true;
     }
     
     public function dealInitialCards() {
+        if ($this->gameState !== 'betting') return false;
+        
+        $this->gameState = 'dealing_progressive';
+        $this->dealStep = 0;
+        
+        return true;
+    }
+    
+    public function dealAllCardsAtOnce() {
         if ($this->gameState !== 'betting') return false;
         
         $this->gameState = 'dealing';
@@ -88,6 +108,95 @@ class BaccaratGame {
         $this->determineWinner();
         
         return true;
+    }
+    
+    public function dealNextCard() {
+        if ($this->gameState !== 'dealing_progressive') return 'error';
+        
+        switch ($this->dealStep) {
+            case 0: // Player first card
+                $this->playerHand[] = $this->deck->dealCard();
+                $this->dealStep = 1;
+                return 'continue';
+                
+            case 1: // Banker first card
+                $this->bankerHand[] = $this->deck->dealCard();
+                $this->dealStep = 2;
+                return 'continue';
+                
+            case 2: // Player second card
+                $this->playerHand[] = $this->deck->dealCard();
+                $this->dealStep = 3;
+                return 'continue';
+                
+            case 3: // Banker second card
+                $this->bankerHand[] = $this->deck->dealCard();
+                $this->dealStep = 4;
+                $this->calculateScores();
+                
+                // Check for naturals
+                if ($this->playerScore >= 8 || $this->bankerScore >= 8) {
+                    $this->determineWinner();
+                    return 'finished';
+                }
+                return 'continue';
+                
+            case 4: // Player third card (if needed)
+                if ($this->playerScore <= 5) {
+                    $this->playerHand[] = $this->deck->dealCard();
+                    $this->calculateScores();
+                    $this->dealStep = 5;
+                    return 'continue';
+                } else {
+                    $this->dealStep = 6; // Skip to banker decision
+                    return $this->dealNextCard(); // Continue immediately to banker decision
+                }
+                
+            case 5: // Banker third card (if needed)
+                $playerThirdCard = count($this->playerHand) > 2 ? $this->playerHand[2] : null;
+                if ($this->shouldBankerDraw($playerThirdCard)) {
+                    $this->bankerHand[] = $this->deck->dealCard();
+                    $this->calculateScores();
+                    $this->dealStep = 6;
+                    return 'continue';
+                } else {
+                    $this->dealStep = 6;
+                    return $this->dealNextCard(); // Continue immediately to finish
+                }
+                
+            case 6: // Finish dealing
+                $this->determineWinner();
+                return 'finished';
+        }
+        
+        return 'error';
+    }
+    
+    private function shouldBankerDraw($playerThirdCard) {
+        if ($playerThirdCard === null) {
+            return $this->bankerScore <= 5;
+        }
+        
+        $thirdCardValue = $playerThirdCard->getValue();
+        
+        switch ($this->bankerScore) {
+            case 0:
+            case 1:
+            case 2:
+                return true;
+            case 3:
+                return $thirdCardValue !== 8;
+            case 4:
+                return in_array($thirdCardValue, [2, 3, 4, 5, 6, 7]);
+            case 5:
+                return in_array($thirdCardValue, [4, 5, 6, 7]);
+            case 6:
+                return in_array($thirdCardValue, [6, 7]);
+            case 7:
+                return false;
+        }
+        
+        return false;
     }
     
     private function calculateScores() {
@@ -182,7 +291,8 @@ class BaccaratGame {
             'bankerHand' => $this->bankerHand,
             'playerScore' => $this->playerScore,
             'bankerScore' => $this->bankerScore,
-            'result' => $this->result
+            'result' => $this->result,
+            'dealStep' => $this->dealStep
         ];
     }
     
